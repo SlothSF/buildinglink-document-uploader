@@ -1,0 +1,58 @@
+{
+  "name": "buildinglink-automation",
+  "version": "2.21.1",
+  "description": "BuildingLink Document Uploader - desktop tool for filing unit PDFs into BuildingLink and the unit file folders.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "cli": "node upload.js",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Woodlake Towers",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.60.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.woodlaketowers.buildinglinkuploader",
+    "productName": "BuildingLink Document Uploader",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "BuildingLink Document Uploader"
+    },
+    "asarUnpack": [
+      "node_modules/playwright/**",
+      "node_modules/playwright-core/**"
+    ],
+    "files": [
+      "**/*",
+      "!debug-*.png",
+      "!error-*.png",
+      "!upload_log_*.txt",
+      "!save-diagnostics_*.txt",
+      "!occupant-cards-*.txt",
+      "!dist/**"
+    ]
+  }
+}
+

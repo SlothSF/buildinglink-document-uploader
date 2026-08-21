@@ -1,0 +1,37 @@
+# ─── Dependencies & build output ─────────────────────────────────────────────
+node_modules/
+dist/
+build/icon-generated*
+
+# ─── Run artifacts: these contain RESIDENT DATA. Never commit. ───────────────
+# Screenshots of live BuildingLink pages (occupant names, unit numbers)
+debug-*.png
+error-*.png
+presave_*.png
+postsave_*.png
+unverified_*.png
+*.png
+!build/icon.png
+
+# Run logs (unit numbers, occupant names, document titles)
+upload_log_*.txt
+
+# Save diagnostics (network payloads, form values, unit numbers)
+save-diagnostics_*.txt
+
+# Occupant card dumps (names, roles, raw DOM)
+occupant-cards-*.txt
+
+# Exported spreadsheets
+*.xlsx
+*.xls
+*.csv
+
+# ─── Local / editor ──────────────────────────────────────────────────────────
+.env
+.env.*
+*.local
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

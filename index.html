@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+<title>BuildingLink Document Uploader</title>
+<style>
+  :root {
+    --bg:        #0f1115;
+    --panel:     #171a21;
+    --panel-2:   #1e222b;
+    --border:    #2a2f3a;
+    --text:      #e8ebf0;
+    --muted:     #99a1b3;
+    --accent:    #3b82f6;
+    --accent-2:  #2563eb;
+    --green:     #22c55e;
+    --amber:     #f59e0b;
+    --red:       #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { margin: 0 0 2px; font-size: 22px; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 14px; }
+
+  .counts {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .chip {
+    position: relative;
+    overflow: hidden;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 12px;
+    cursor: pointer;
+    transition: border-color .15s, transform .05s, background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    user-select: none;
+  }
+  /* Progress fill — how much of THIS type's batch has been processed. Sits
+     behind the label/number (which are lifted above it by z-index). */
+  .chip::after {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: var(--prog, 0%);
+    background: rgba(59,130,246,.20);
+    transition: width .3s ease;
+    pointer-events: none;
+  }
+  .chip > * { position: relative; z-index: 1; }
+
+  /* The file currently being processed. */
+  .chip.active { border-color: var(--amber); }
+  .chip.active .num { color: #ffd689; background: #3a2c10; }
+
+  /* Count ticking down live — a brief flash so the change is noticeable. */
+  @keyframes numTick {
+    0%   { transform: scale(1);    background: var(--accent-2); color: #fff; }
+    100% { transform: scale(1); }
+  }
+  .chip .num.tick { animation: numTick .6s ease-out; }
+
+  /* Files of this type that errored this run and are still in the folder. */
+  .chip .errs {
+    display: none;
+    font-size: 11.5px; font-weight: 700;
+    color: #ff9d9d; background: #3a1a1e; border: 1px solid #7a2e38;
+    border-radius: 999px; padding: 0 6px;
+  }
+  .chip .errs.show { display: inline-block; }
+  .chip:hover:not(.disabled) { border-color: var(--accent); background: #232838; }
+  .chip:active:not(.disabled) { transform: translateY(1px); }
+  .chip.disabled { opacity: .4; cursor: default; }
+  .chip.zero { opacity: .45; }
+  .chip .label { font-size: 13.5px; color: var(--text); }
+  .chip .num {
+    font-size: 16px; font-weight: 700; min-width: 26px; text-align: center;
+    color: var(--accent); background: #11203a; border-radius: 7px; padding: 1px 7px;
+  }
+  .chip.zero .num { color: var(--muted); background: #20242e; }
+
+  /* Selected file-type square: glowing accent border + halo. Runs act on the
+     glowing set; nothing glowing = every type (unchanged behaviour). */
+  .chip.selected {
+    border-color: var(--accent);
+    background: #1b2740;
+    box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(59,130,246,.55);
+  }
+  .chip.selected .label { color: #cfe0ff; font-weight: 600; }
+  .chip.selected .num { color: #fff; background: var(--accent-2); }
+  .chip.selected::before {
+    content: "✓";
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 13px;
+    margin-right: -2px;
+  }
+  /* Keep the glow visible (but calm) while a run is in progress. */
+  .chip.selected.disabled { opacity: .75; box-shadow: 0 0 0 1px var(--accent); }
+
+  #selInfo {
+    margin-top: 10px; font-size: 13px; color: var(--muted);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  #selInfo.active { color: #9cc0ff; }
+  #selInfo .pill {
+    background: #11203a; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 999px; padding: 2px 10px; font-weight: 600; font-size: 12.5px;
+  }
+
+  .toolbar {
+    padding: 14px 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  button.action {
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px 22px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .05s;
+  }
+  button.action:hover:not(:disabled) { border-color: var(--accent); background: #232838; }
+  button.action:active:not(:disabled) { transform: translateY(1px); }
+  button.action:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent-2); border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { background: var(--accent); }
+  button.ghost { background: transparent; }
+
+  /* ── Run stats: live timer, throughput, ETA ──────────────────
+     Hidden until a batch actually starts (i.e. after login), because that's
+     when the clock starts — the timer measures filing time, not the time the
+     operator spent typing a password. */
+  .runstats {
+    display: none;
+    margin-left: auto;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+  }
+  .runstats.show { display: flex; }
+  .runstats .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .runstats .clock { color: #cfe0ff; font-size: 15px; }
+  .runstats .rate  { color: var(--green); }
+  .runstats .eta   { color: var(--muted); font-weight: 600; }
+  .runstats .prog  { color: var(--text); }
+  .runstats .sep   { color: var(--border); }
+  /* When the run stats take the right-hand slot, the status dot sits before it. */
+  .runstats.show ~ .status { margin-left: 0; }
+
+  .status { margin-left: auto; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 14px; min-width: 0; }
+  /* "Processing 12 of 469 — <filename>" must never widen the toolbar. */
+  #statusText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); }
+  .dot.running { background: var(--amber); animation: pulse 1s infinite; }
+  .dot.done { background: var(--green); }
+  .dot.error { background: var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  #refresh { font-size: 13px; padding: 8px 14px; }
+
+  /* Diagnostic A/B switch — deliberately understated; it is not a normal control. */
+  .testtoggle {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; color: var(--muted); user-select: none; cursor: pointer;
+    border: 1px dashed var(--border); border-radius: 8px; padding: 7px 11px;
+  }
+  .testtoggle:hover { color: var(--text); border-color: var(--accent); }
+  .testtoggle input { accent-color: var(--amber); cursor: pointer; }
+  .testtoggle.on { color: #ffd689; border-color: var(--amber); border-style: solid; }
+
+  /* Run controls — hidden until a run starts, then they own the toolbar. */
+  .runctl { display: none; }
+  .runctl.show { display: inline-block; }
+  button.warn { background: #3a2c10; border-color: #7a5c19; color: #ffd689; }
+  button.warn:hover:not(:disabled) { border-color: var(--amber); background: #4a3714; }
+  button.stop { background: #3a1a1e; border-color: #7a2e38; color: #ff9d9d; }
+  button.stop:hover:not(:disabled) { border-color: var(--red); background: #4a2027; }
+  button.resume { background: var(--green); border-color: #16a34a; color: #06240f; }
+  button.resume:hover:not(:disabled) { background: #34d977; }
+
+  .dot.paused { background: var(--amber); }
+
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 24px 16px; }
+  .log-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 8px; }
+  .log-head h2 { font-size: 15px; margin: 0; color: var(--muted); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+  #clearLog { font-size: 12px; padding: 6px 12px; }
+
+  /* Positioning context for the floating "Jump to bottom" button. */
+  .log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+
+  #jumpBottom {
+    position: absolute;
+    right: 20px;
+    bottom: 16px;
+    display: none;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--accent-2);
+    border-color: var(--accent);
+    box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    z-index: 5;
+  }
+  #jumpBottom.show { display: inline-block; }
+  #jumpBottom .new-dot {
+    display: none; width: 7px; height: 7px; border-radius: 50%;
+    background: #fff; margin-left: 7px; vertical-align: middle;
+  }
+  #jumpBottom.unread .new-dot { display: inline-block; }
+
+  #log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: #0b0d11;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+    font-size: 13.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log .ln { display: block; }
+  #log .ln.err   { color: #ff8a8a; }
+  #log .ln.warn  { color: #ffcf6b; }
+  #log .ln.ok    { color: #7ee2a0; }
+  #log .ln.head  { color: #8fb8ff; }
+  #log .ln.dim   { color: #7c8496; }   /* raw "Details:" under a plain-English error */
+  /* Step duration appended to a step's own line once it completes. */
+  #log .dur { color: #8fb8ff; font-weight: 600; }
+  #log .empty { color: var(--muted); }
+
+  /* ── "Show details" disclosure (raw technical error) ────────── */
+  .err-details { margin-top: 12px; }
+  .err-details > summary {
+    cursor: pointer; color: var(--muted); font-size: 13px;
+    list-style: none; user-select: none; display: inline-block;
+    padding: 4px 0;
+  }
+  .err-details > summary::-webkit-details-marker { display: none; }
+  .err-details > summary::before { content: "▸ "; }
+  .err-details[open] > summary::before { content: "▾ "; }
+  .err-details > summary:hover { color: var(--text); }
+  .err-details pre {
+    margin: 6px 0 0;
+    background: #0b0d11; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5;
+    color: #ffb4b4;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow: auto;
+  }
+
+  /* Modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .overlay.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    width: min(640px, 92vw);
+    max-height: 82vh;
+    overflow: auto;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h3 { margin: 0 0 12px; font-size: 19px; }
+  .modal .ctx { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .modal .ctx-row { font-size: 14.5px; color: var(--text); word-break: break-word; }
+  .modal .ctx-label { display: inline-block; min-width: 46px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .modal .unit-badge { background: #11203a; color: var(--accent); border-radius: 6px; padding: 1px 9px; font-weight: 700; }
+  .modal .msg { font-size: 15.5px; color: var(--text); margin-bottom: 16px; line-height: 1.5; }
+  .modal .opts { display: flex; flex-direction: column; gap: 10px; }
+
+  .opt-btn {
+    text-align: left; width: 100%; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 11px;
+    padding: 14px 16px; color: var(--text);
+    transition: border-color .12s, background .12s, transform .05s;
+  }
+  .opt-btn:hover { border-color: var(--accent); background: #232838; }
+  .opt-btn:active { transform: translateY(1px); }
+  .opt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .opt-btn.selected { border-color: var(--accent); background: #1b2740; }
+  .opt-btn.toggle .opt-label::before { content: "○  "; color: var(--muted); }
+  .opt-btn.toggle.selected .opt-label::before { content: "●  "; color: var(--accent); }
+  .opt-label { font-size: 16px; font-weight: 600; }
+  .opt-desc { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
+
+  /* dynamic text input fallback */
+  .modal input[type=text] {
+    width: 100%; font-size: 17px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  }
+  .modal input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .modal .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  .modal .row:empty { margin-top: 0; }
+  .action.danger { color: #ff8a8a; border-color: #4a2630; }
+  .action.danger:hover:not(:disabled) { border-color: var(--red); background: #2a1a1e; }
+
+  /* Summary */
+  .summary {
+    margin: 12px 0; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px; display: none;
+  }
+  .summary.show { display: block; }
+  .summary h2 { margin: 0 0 12px; font-size: 17px; }
+  .summary .stats { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 8px; }
+  .summary .stat .n { font-size: 26px; font-weight: 700; }
+  .summary .stat .l { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .summary .n.green { color: var(--green); }
+  .summary .n.amber { color: var(--amber); }
+  .summary .n.red   { color: var(--red); }
+  .summary .n.blue  { color: #7fb0ff; }
+  .summary .stat .n.time { font-size: 20px; }
+  .summary .attention { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .summary .attention .t { color: var(--amber); font-weight: 600; margin-bottom: 6px; }
+  .summary .attention li { font-size: 13.5px; color: var(--text); margin: 3px 0; }
+  /* Needs-attention entries: filename, then the plain-English cause, then the
+     raw text folded away behind "Show details". */
+  .summary .att-item { margin: 10px 0; }
+  .summary .att-file { font-weight: 600; font-size: 13.5px; word-break: break-word; }
+  .summary .att-why  { font-size: 13.5px; color: #ffcf6b; margin-top: 2px; line-height: 1.45; }
+  .summary .att-item .err-details { margin-top: 4px; }
+  .summary .att-item .err-details > summary { font-size: 12px; }
+  .summary .timing {
+    margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;
+    font-size: 13.5px; color: var(--muted);
+  }
+  .summary .timing b { color: var(--text); font-weight: 600; }
+
+  /* ── Step breakdown: where the run's time actually went ────── */
+  .steps { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .steps .t { font-size: 13px; color: var(--muted); text-transform: uppercase;
+              letter-spacing: .04em; font-weight: 600; margin-bottom: 8px; }
+  .steps table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .steps th {
+    text-align: right; font-weight: 600; color: var(--muted); font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .04em; padding: 0 8px 6px; white-space: nowrap;
+  }
+  .steps th:first-child, .steps td:first-child { text-align: left; }
+  .steps td { padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .steps td.name { width: 30%; }
+  .steps tr.top td { font-weight: 700; }   /* the costliest step — optimize this one */
+  /* Share-of-run bar, drawn behind the last cell. */
+  .steps td.bar { width: 34%; padding-right: 0; }
+  .steps .barwrap { background: #11203a; border-radius: 4px; height: 9px; width: 100%; overflow: hidden; }
+  .steps .barfill { background: var(--accent); height: 100%; border-radius: 4px; }
+  .steps tr.top .barfill { background: var(--amber); }
+
+  /* ── Welcome / splash screen ───────────────────────────────── */
+  #welcome {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px;
+    perspective: 900px;            /* gives the title a real 3D depth */
+    cursor: pointer;
+    opacity: 0;                    /* JS transitions to 1 (fade in), back to 0 (fade out) */
+    transition: opacity .8s ease;
+  }
+  #welcome.dismiss { pointer-events: none; }
+
+  #welcome .logo-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 40px;
+  }
+  /* The knockout canvas (or fallback img) the logo is drawn into. */
+  #welcome .logo-wrap canvas,
+  #welcome .logo-wrap img {
+    max-width: 360px; max-height: 230px; width: auto; height: auto;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,.45));
+  }
+
+  #welcome .welcome-title {
+    font-size: 30px; font-weight: 700; letter-spacing: .01em;
+    color: var(--text);
+    transform-style: preserve-3d;
+    animation: coinSpin 6s linear infinite;
+    will-change: transform;
+  }
+  /* Subtle 3D coin flip on the Y axis — continuous until dismissed. */
+  @keyframes coinSpin {
+    from { transform: rotateY(0deg); }
+    to   { transform: rotateY(360deg); }
+  }
+  /* On dismiss: stop the loop and settle smoothly to face-front. */
+  #welcome .welcome-title.stop {
+    animation: none;
+    transform: rotateY(0deg);
+    transition: transform .55s ease;
+  }
+
+  #welcome .welcome-hint {
+    font-size: 14px; color: var(--muted);
+    animation: hintPulse 2.4s ease-in-out infinite;
+  }
+  @keyframes hintPulse { 0%,100% { opacity: .45; } 50% { opacity: .9; } }
+</style>
+</head>
+<body>
+  <!-- Welcome / splash screen (fades in on open, dismissed on any key/click) -->
+  <div id="welcome">
+    <div class="logo-wrap" id="logoWrap"></div>
+    <div class="welcome-title" id="welcomeTitle">BuildingLink Document Uploader</div>
+    <div class="welcome-hint">Press any key or click to continue</div>
+  </div>
+
+  <header>
+    <h1>BuildingLink Document Uploader</h1>
+    <div class="sub" id="scanSub">Scanning source folder…</div>
+    <div class="counts" id="counts"></div>
+    <div id="selInfo">Click file-type squares to select them — runs will then cover only the glowing types.</div>
+  </header>
+
+  <div class="toolbar">
+    <button class="action primary" id="btnTest">▶ Test Mode <span style="font-weight:400;opacity:.8" id="lblTest">(1 per type)</span></button>
+    <button class="action primary" id="btnFull">⏩ Full Run <span style="font-weight:400;opacity:.8" id="lblFull">(all files)</span></button>
+    <button class="action ghost" id="btnDry">🧪 Dry Run <span style="font-weight:400;opacity:.7" id="lblDry">(offline preview)</span></button>
+    <button class="action ghost" id="btnClearSel" disabled>✕ Clear Selection</button>
+    <button class="action ghost" id="refresh">↻ Rescan</button>
+    <label class="testtoggle" id="skipRoleMapWrap" title="Diagnostic A/B: skips the [2b] Unit Overview read so you can see whether that step is what leaves the Add Document form missing its association options.">
+      <input type="checkbox" id="skipRoleMap"> Skip [2b] Unit Overview read
+    </label>
+    <button class="action warn runctl" id="btnPause">⏸ Pause</button>
+    <button class="action resume runctl" id="btnResume">▶ Resume</button>
+    <button class="action stop runctl" id="btnStop">⏹ Stop</button>
+    <div class="runstats" id="runStats" title="Elapsed time · throughput · files done · estimated time remaining">
+      <span class="v clock" id="statElapsed">0:00</span>
+      <span class="sep">·</span>
+      <span class="v rate" id="statRate">—</span>
+      <span class="sep">·</span>
+      <span class="v prog" id="statProg">0 / 0</span>
+      <span class="v eta" id="statEta"></span>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Idle</span></div>
+  </div>
+
+  <main>
+    <div class="summary" id="summary"></div>
+    <div class="log-head">
+      <h2>Live Log</h2>
+      <button class="action ghost" id="clearLog">Clear</button>
+    </div>
+    <div class="log-wrap">
+      <div id="log"><span class="empty">No activity yet. Pick a mode above to begin.</span></div>
+      <button class="action primary" id="jumpBottom">↓ Jump to bottom<span class="new-dot"></span></button>
+    </div>
+  </main>
+
+  <!-- Prompt modal (buttons are built dynamically per prompt) -->
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <h3 id="modalTitle">Action needed</h3>
+      <div class="ctx" id="modalCtx"></div>
+      <div class="msg" id="modalMsg"></div>
+      <div class="opts" id="modalOpts"></div>
+      <div class="row" id="modalRow"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const api = window.api;
+
+  // Friendly labels for each scan category (skip is shown but not runnable).
+  const TYPES = [
+    ['inspection',       '📋 Inspections'],
+    ['windowreplacement','🪟 Window Replace'],
+    ['keylog',           '🔑 Key Logs'],
+    ['poolpass',         '🏊 Pool Passes'],
+    ['parking',          '🚗 Parking Permits'],
+    ['returnedparking',  '🚗 Returned Parking'],
+    ['bicycle',          '🚲 Bicycle Reg'],
+    ['keyfob',           '🔐 Key Fobs'],
+    ['lease',            '📄 Lease Agreements'],
+    ['addendum',         '📑 Lease Addenda'],
+    ['movein1',          '📦 Move In & BL Form'],
+    ['movein2',          '📦 Move In & Out'],
+    ['movein3',          '📦 Move In App'],
+    ['moveout',          '📦 Move-Out Forms'],
+    ['meetingroom',      '🏛️ Meeting Room'],
+    ['guestroom',        '🛏️ Guest Room Res'],
+    ['delivery',         '📦 Delivery Forms'],
+    ['workorder',        '🛠️ Work Orders'],
+    ['commonarea',       '🏢 Common Area WOs'],
+    ['waterleak',        '💧 Water Leaks'],
+    ['alta',             '🏠 ALTA Settlements'],
+    ['ownership',        '📜 Deeds / POAs'],
+    ['storagebin',       '📦 Storage Bins'],
+    ['yardsale',         '🛍️ Yard Sales'],
+    ['blform',           '📝 BuildingLink Forms'],
+    ['insurance',        '🛡️ Insurance'],
+    ['resale',           '🏷️ Resale Packages'],
+    ['correspondence',   '✉️ Correspondence'],
+    ['unknown',          '⚠️ Unknown'],
+    ['skip',             '⏭️ Skipped'],
+  ];
+
+  // Categories shown for visibility but never processed (no handler / never run).
+  const NON_RUNNABLE = new Set(['skip']);
+
+  const $ = id => document.getElementById(id);
+  const logEl = $('log'), countsEl = $('counts');
+  let running = false;
+  let logHasContent = false;
+
+  // Types the operator has clicked (the glowing squares). Empty = no filter, so
+  // every mode behaves exactly as it did before this selection UI existed.
+  const selected = new Set();
+  let lastCounts = {};
+
+  // ── Log pane ────────────────────────────────────────────────
+  function classify(line) {
+    // Raw technical text printed under a plain-English error — keep it quiet so
+    // the readable sentence above it is what the eye lands on.
+    if (/^\s*Details:/.test(line)) return 'dim';
+    if (/✗|FATAL|ERROR|✕/.test(line)) return 'err';
+    if (/⚠️|WOULD ERROR|attention/i.test(line)) return 'warn';
+    if (/✓|Saved|Uploaded|moved|COMPLETE/i.test(line)) return 'ok';
+    if (/[═━─]{6,}|SUMMARY|DRY RUN/.test(line)) return 'head';
+    return '';
+  }
+  // Sticky-bottom scrolling: follow the tail only while the operator is already
+  // at the tail. The moment they scroll up to read an earlier error, new lines
+  // stop yanking them back down — the "Jump to bottom" button (with an unread
+  // dot once more lines have arrived) takes them back when they're ready.
+  const jumpBtn = $('jumpBottom');
+  const BOTTOM_SLOP_PX = 24;   // treat "within a line or two" as being at the bottom
+  function isAtBottom() {
+    return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <= BOTTOM_SLOP_PX;
+  }
+  function scrollToBottom() {
+    logEl.scrollTop = logEl.scrollHeight;
+    jumpBtn.classList.remove('show', 'unread');
+  }
+  function syncJumpBtn(hasNew) {
+    if (isAtBottom()) { jumpBtn.classList.remove('show', 'unread'); return; }
+    jumpBtn.classList.add('show');
+    if (hasNew) jumpBtn.classList.add('unread');
+  }
+  logEl.addEventListener('scroll', () => syncJumpBtn(false));
+  jumpBtn.onclick = scrollToBottom;
+
+  function appendLog(line) {
+    if (!logHasContent) { logEl.innerHTML = ''; logHasContent = true; }
+    // Decide BEFORE appending — appending changes scrollHeight.
+    const stick = isAtBottom();
+    const span = document.createElement('span');
+    span.className = 'ln ' + classify(line);
+    span.textContent = line;
+    logEl.appendChild(span);
+    if (stick) scrollToBottom(); else syncJumpBtn(true);
+  }
+  // Log lines the engine can come back and update — used for step timings, so
+  // "[3] Opening Documents tab..." appears the instant the step starts (you can
+  // see where a slow file is stuck) and becomes "... (4.5s)" when it finishes.
+  // Each id is appended to exactly once, then dropped, so the map stays small.
+  const openLines = new Map();
+
+  function appendLogLine(id, line) {
+    if (!logHasContent) { logEl.innerHTML = ''; logHasContent = true; }
+    const stick = isAtBottom();
+    const span = document.createElement('span');
+    span.className = 'ln ' + classify(line);
+    span.textContent = line;
+    logEl.appendChild(span);
+    openLines.set(id, span);
+    if (stick) scrollToBottom(); else syncJumpBtn(true);
+  }
+
+  function appendToLine(id, suffix) {
+    const span = openLines.get(id);
+    openLines.delete(id);
+    if (!span || !span.isConnected) return;     // line was cleared away
+    const stick = isAtBottom();
+    const dur = document.createElement('span');
+    dur.className = 'dur';
+    dur.textContent = suffix;
+    span.appendChild(dur);
+    if (stick) scrollToBottom();
+  }
+
+  api.onLogUpdate(p => {
+    if (!p || p.id == null) return;
+    if (typeof p.text === 'string') appendLogLine(p.id, p.text);
+    else if (typeof p.append === 'string') appendToLine(p.id, p.append);
+  });
+
+  $('clearLog').onclick = () => {
+    logEl.innerHTML = '<span class="empty">Cleared.</span>';
+    logHasContent = false;
+    openLines.clear();
+    scrollToBottom();
+  };
+
+  // ── Status ──────────────────────────────────────────────────
+  function setStatus(state, text) {
+    $('dot').className = 'dot' + (state ? ' ' + state : '');
+    $('statusText').textContent = text;
+    $('statusText').title = text;   // the ellipsised tail stays readable on hover
+  }
+  // Buttons that must stay live while a run is in progress — the log controls
+  // and the run controls are exactly the things you need DURING a run.
+  const ALWAYS_LIVE = new Set(['clearLog', 'jumpBottom', 'btnPause', 'btnResume', 'btnStop']);
+
+  function setRunning(on) {
+    running = on;
+    document.querySelectorAll('.action').forEach(b => {
+      if (ALWAYS_LIVE.has(b.id)) return;
+      b.disabled = on;
+    });
+    document.querySelectorAll('.chip').forEach(c => {
+      c.classList.toggle('disabled', on || c.dataset.count === '0' || NON_RUNNABLE.has(c.dataset.type));
+    });
+    setRunControlState(on ? 'running' : 'idle');
+    if (on) {
+      resetLiveStats();
+    } else {
+      stopRunTimer();             // freeze the timer on its final reading
+      countsEl.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
+      syncSelectionUI();          // restore Clear Selection's own enabled state
+    }
+  }
+
+  // ── Pause / Resume / Stop ───────────────────────────────────
+  // The engine gates MID-FILE, so both controls take effect in a fraction of a
+  // second wherever the run happens to be — no waiting for the current document
+  // to finish. Pause parks the file in place and Resume continues on the same
+  // step; Stop abandons the file in flight (nothing uploaded, PDF left in the
+  // source folder). The single exception is a save already under way: the engine
+  // finishes it and reports 'finishing' while it does, which is the one state
+  // where the buttons deliberately do NOT respond instantly.
+  const btnPause = $('btnPause'), btnResume = $('btnResume'), btnStop = $('btnStop');
+  // idle | running | pausing | paused | stopping | finishing
+  let runCtlState = 'idle';
+  // What Pause/Stop is waiting on during 'finishing', so the state can be
+  // restored once the engine tells us the critical work is done.
+  let pendingIntent = null;   // 'pause' | 'stop' | null
+
+  function setRunControlState(state, info) {
+    runCtlState = state;
+    const active = state !== 'idle';
+    const showResume = state === 'paused';
+    btnPause.classList.toggle('show', active && !showResume);
+    btnResume.classList.toggle('show', active && showResume);
+    btnStop.classList.toggle('show', active);
+
+    btnPause.disabled  = state === 'pausing' || state === 'stopping' || state === 'finishing';
+    btnResume.disabled = state === 'stopping' || state === 'finishing';
+    btnStop.disabled   = state === 'stopping';
+
+    btnPause.textContent = (state === 'pausing' || (state === 'finishing' && pendingIntent === 'pause'))
+      ? '⏸ Pausing…' : '⏸ Pause';
+    btnStop.textContent  = (state === 'stopping' || (state === 'finishing' && pendingIntent === 'stop'))
+      ? '⏹ Stopping…' : '⏹ Stop';
+
+    const at = (info && info.step) ? ` at ${info.step}` : '';
+    if (state === 'pausing')        setStatus('running', 'Pausing…');
+    else if (state === 'paused')    setStatus('paused',  `Paused${at} — Resume picks up right here`);
+    else if (state === 'stopping')  setStatus('running', 'Stopping…');
+    else if (state === 'finishing') {
+      // Explain the hold. Without this the buttons just look broken for a few
+      // seconds, and this is precisely the window that must not be cut short.
+      const what = (info && info.finishing) || 'the current upload';
+      setStatus('running', `Finishing ${what} — this step can't be interrupted safely…`);
+    }
+  }
+
+  btnPause.onclick = () => {
+    if (!running || runCtlState !== 'running') return;
+    pendingIntent = 'pause';
+    setRunControlState('pausing');
+    api.pauseRun();
+  };
+  btnResume.onclick = () => {
+    if (!running || runCtlState !== 'paused') return;
+    pendingIntent = null;
+    setRunControlState('running');
+    setStatus('running', 'Resuming…');
+    api.resumeRun();
+  };
+  btnStop.onclick = () => {
+    if (!running || runCtlState === 'stopping') return;
+    pendingIntent = 'stop';
+    setRunControlState('stopping');
+    appendLog('\n⏹ Stop requested — ending now. Any file in progress is left untouched in the source folder.');
+    api.stopRun();
+  };
+
+  // Authoritative state from the engine (it, not the UI, decides when a pause
+  // has actually taken hold).
+  api.onRunState(({ state, finishing, step }) => {
+    if (!running) return;
+    // Paused stretches are excluded from the throughput calculation, so mark
+    // when the run actually parks and when it picks back up.
+    if (state === 'paused' && !live.pausedAt) live.pausedAt = Date.now();
+    if (state !== 'paused' && live.pausedAt) {
+      live.pausedMs += Date.now() - live.pausedAt;
+      live.pausedAt = 0;
+    }
+    const info = { finishing, step };
+    if (state === 'paused')         { pendingIntent = null; setRunControlState('paused', info); }
+    else if (state === 'pausing')   setRunControlState('pausing', info);
+    else if (state === 'finishing') setRunControlState('finishing', info);
+    else if (state === 'stopping' || state === 'aborted') setRunControlState('stopping', info);
+    else if (state === 'running' && (runCtlState === 'paused' || runCtlState === 'finishing')) {
+      pendingIntent = null;
+      setRunControlState('running', info);
+    }
+  });
+
+  // ── Live run stats: counts, timer, throughput, ETA ───────────
+  // During a run the header squares stop being a static scan result and become
+  // a live countdown: each square shows how many files of that type are STILL
+  // in the source folder. A file that errored stays in the folder, so it does
+  // NOT count down — it adds to the red ⚠ badge instead, which is why the
+  // numbers can finish above zero and still be telling the truth.
+  const live = {
+    counts: {},       // type → files still in the source folder
+    batch:  {},       // type → files this run intends to process
+    done:   {},       // type → files of this type finished (ok or not)
+    errors: {},       // type → files of this type that errored and stayed put
+    total: 0,         // files in the whole batch
+    processed: 0,     // files finished so far
+    startMs: 0,       // batch start (after login) — 0 until 'batch-start'
+    pausedMs: 0,      // completed pause time
+    pausedAt: 0,      // >0 while currently parked at a pause
+    timerId: null,
+    finalMs: null,    // authoritative duration once the engine reports it
+  };
+
+  const runStats = $('runStats');
+
+  function chipOf(type) { return countsEl.querySelector(`.chip[data-type="${type}"]`); }
+
+  // Repaint one square from `live` (number, ⚠ badge, progress fill, tooltip).
+  function paintChip(type, { tick = false } = {}) {
+    const chip = chipOf(type);
+    if (!chip) return;
+    const n = live.counts[type] || 0;
+    const numEl = chip.querySelector('.num');
+    if (numEl && numEl.textContent !== String(n)) {
+      numEl.textContent = String(n);
+      if (tick) {
+        numEl.classList.remove('tick');
+        void numEl.offsetWidth;          // restart the animation
+        numEl.classList.add('tick');
+      }
+    }
+    chip.dataset.count = String(n);
+    chip.classList.toggle('zero', n === 0);
+
+    const errs = live.errors[type] || 0;
+    const errEl = chip.querySelector('.errs');
+    if (errEl) {
+      errEl.textContent = '⚠ ' + errs;
+      errEl.classList.toggle('show', errs > 0);
+    }
+
+    const batch = live.batch[type] || 0;
+    const done  = live.done[type]  || 0;
+    chip.style.setProperty('--prog', batch ? Math.min(100, (done / batch) * 100) + '%' : '0%');
+    if (batch) {
+      chip.title = `${done} of ${batch} processed this run — ${n} left in the source folder` +
+                   (errs ? ` (${errs} errored and still need attention)` : '');
+    }
+  }
+
+  // Header total mirrors the squares (skipped files were never counted).
+  function paintTotal() {
+    let total = 0;
+    for (const [type] of TYPES) if (type !== 'skip') total += (live.counts[type] || 0);
+    $('scanSub').textContent = `${total} file${total === 1 ? '' : 's'} ready to process in the source folder.`;
+  }
+
+  // 0:42 · 12:07 · 1:04:19
+  function fmtClock(ms) {
+    const t = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    const pad = v => String(v).padStart(2, '0');
+    return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  }
+  // "42 minutes 18 seconds" — the long form, for the completion summary.
+  function fmtHuman(ms) {
+    const t = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    const p = [];
+    if (h) p.push(`${h} hour${h === 1 ? '' : 's'}`);
+    if (m) p.push(`${m} minute${m === 1 ? '' : 's'}`);
+    if (s || !p.length) p.push(`${s} second${s === 1 ? '' : 's'}`);
+    return p.join(' ');
+  }
+
+  function elapsedMs() {
+    if (!live.startMs) return 0;
+    return Date.now() - live.startMs;
+  }
+  // Time actually spent working — paused stretches are taken out so a long
+  // coffee break doesn't make the files/min rate look terrible.
+  function activeMs() {
+    const paused = live.pausedMs + (live.pausedAt ? Date.now() - live.pausedAt : 0);
+    return Math.max(0, elapsedMs() - paused);
+  }
+  function currentRate() {
+    const a = activeMs();
+    if (!live.processed || a < 3000) return 0;
+    return live.processed / (a / 60000);
+  }
+
+  function paintRunStats() {
+    if (!live.startMs) return;
+    $('statElapsed').textContent = fmtClock(live.finalMs != null ? live.finalMs : elapsedMs());
+    const r = currentRate();
+    $('statRate').textContent = r ? `${r.toFixed(1)} files/min` : '— files/min';
+    $('statProg').textContent = `${live.processed} / ${live.total}`;
+
+    // Estimated time remaining, straight off the observed rate.
+    const left = Math.max(0, live.total - live.processed);
+    $('statEta').textContent = (r && left && live.finalMs == null)
+      ? `· ~${fmtClock((left / r) * 60000)} left`
+      : '';
+  }
+
+  function startRunTimer() {
+    stopRunTimer();
+    runStats.classList.add('show');
+    live.timerId = setInterval(paintRunStats, 1000);
+    paintRunStats();
+  }
+  function stopRunTimer() {
+    if (live.timerId) { clearInterval(live.timerId); live.timerId = null; }
+  }
+
+  // Wipe per-run state at the start of every run (the squares go back to the
+  // last scan's numbers until the engine reports the batch it actually built).
+  function resetLiveStats() {
+    live.counts = { ...lastCounts };
+    live.batch = {}; live.done = {}; live.errors = {};
+    live.total = 0; live.processed = 0;
+    live.startMs = 0; live.pausedMs = 0; live.pausedAt = 0;
+    live.finalMs = null;
+    stopRunTimer();
+    runStats.classList.remove('show');
+    countsEl.querySelectorAll('.chip').forEach(c => {
+      c.classList.remove('active');
+      c.style.setProperty('--prog', '0%');
+      const e = c.querySelector('.errs');
+      if (e) e.classList.remove('show');
+    });
+  }
+
+  api.onProgress(p => {
+    if (!p || !p.phase) return;
+
+    if (p.phase === 'batch-start') {
+      // The engine's own view of the folder wins over the last UI scan.
+      if (p.folderCounts) live.counts = { ...p.folderCounts };
+      live.batch = { ...(p.byType || {}) };
+      live.done = {}; live.errors = {};
+      live.total = p.total || 0;
+      live.processed = 0;
+      live.startMs = Date.now();
+      live.finalMs = null;
+      for (const [type] of TYPES) paintChip(type);
+      paintTotal();
+      startRunTimer();
+      return;
+    }
+
+    if (p.phase === 'file-start') {
+      const chip = chipOf(p.type);
+      if (chip) {
+        countsEl.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+      }
+      setStatus('running', p.retry
+        ? `Retrying — ${p.filename}`
+        : `Processing ${p.index} of ${p.total} — ${p.filename}`);
+      return;
+    }
+
+    if (p.phase === 'file-end') {
+      // An INTERRUPTED file (Stop pressed while it was in flight) is not a
+      // result of any kind: it was never finished, nothing was uploaded, and the
+      // PDF is still in the source folder. Counting it as processed would
+      // overstate the run, and counting it as an error would put a red ⚠ badge
+      // on a type where nothing actually went wrong. So it only clears the
+      // "active" highlight and leaves every counter alone.
+      if (p.interrupted) {
+        const activeChip = chipOf(p.type);
+        if (activeChip) activeChip.classList.remove('active');
+        paintChip(p.type);
+        paintRunStats();
+        return;
+      }
+      // A RETRY repeats a file that already reported a file-end, so it must not
+      // count again — the totals would drift above the batch size and the type's
+      // square would tick twice for one PDF. Instead it CORRECTS what the first
+      // attempt recorded: if the retry worked, that type loses the error it was
+      // carrying and the file finally comes off the folder count.
+      if (p.retry) {
+        if (p.ok) live.errors[p.type] = Math.max(0, (live.errors[p.type] || 0) - 1);
+        if (p.moved) live.counts[p.type] = Math.max(0, (live.counts[p.type] || 0) - 1);
+      } else {
+        live.processed++;
+        live.done[p.type] = (live.done[p.type] || 0) + 1;
+        // Only a file that actually left the source folder comes off the count.
+        if (p.moved) live.counts[p.type] = Math.max(0, (live.counts[p.type] || 0) - 1);
+        if (!p.ok) live.errors[p.type] = (live.errors[p.type] || 0) + 1;
+      }
+      const chip = chipOf(p.type);
+      if (chip) chip.classList.remove('active');
+      paintChip(p.type, { tick: true });
+      paintTotal();
+      paintRunStats();
+      return;
+    }
+
+    if (p.phase === 'batch-end') {
+      live.finalMs = p.durationMs;
+      live.pausedMs = p.pausedMs || live.pausedMs;
+      countsEl.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
+      paintRunStats();
+      stopRunTimer();   // freeze on the final time
+    }
+  });
+
+  // ── Type selection ──────────────────────────────────────────
+  const labelOf = type => (TYPES.find(t => t[0] === type) || [type, type])[1];
+  const plainLabelOf = type => labelOf(type).replace(/^\S+\s/, '');
+
+  // Files covered by the current selection (0 when nothing is selected).
+  function selectedFileCount() {
+    let n = 0;
+    for (const t of selected) n += (lastCounts[t] || 0);
+    return n;
+  }
+
+  // Reflect the selection everywhere: the info line, the Clear button, and the
+  // mode-button sublabels, so it is obvious what each button will act on.
+  function syncSelectionUI() {
+    const info = $('selInfo');
+    const clearBtn = $('btnClearSel');
+    const count = selected.size;
+
+    clearBtn.disabled = running || count === 0;
+
+    if (count === 0) {
+      info.classList.remove('active');
+      info.textContent = 'Click file-type squares to select them — runs will then cover only the glowing types.';
+      $('lblTest').textContent = '(1 per type)';
+      $('lblFull').textContent = '(all files)';
+      $('lblDry').textContent  = '(offline preview)';
+      return;
+    }
+
+    const files = selectedFileCount();
+    info.classList.add('active');
+    info.innerHTML =
+      `<span class="pill">${count} type${count === 1 ? '' : 's'} selected</span>` +
+      `<span>${esc([...selected].map(plainLabelOf).join(', '))}</span>` +
+      `<span>· ${files} file${files === 1 ? '' : 's'} — runs cover only these.</span>`;
+
+    $('lblTest').textContent = `(1 per selected type)`;
+    $('lblFull').textContent = `(all ${files} file${files === 1 ? '' : 's'} in selection)`;
+    $('lblDry').textContent  = `(preview selection)`;
+  }
+
+  function toggleType(type) {
+    if (running) return;
+    if (selected.has(type)) selected.delete(type); else selected.add(type);
+    const chip = countsEl.querySelector(`.chip[data-type="${type}"]`);
+    if (chip) chip.classList.toggle('selected', selected.has(type));
+    syncSelectionUI();
+  }
+
+  function clearSelection() {
+    if (running || selected.size === 0) return;
+    selected.clear();
+    countsEl.querySelectorAll('.chip.selected').forEach(c => c.classList.remove('selected'));
+    syncSelectionUI();
+  }
+  $('btnClearSel').onclick = clearSelection;
+
+  // ── Counts header ───────────────────────────────────────────
+  function renderCounts(counts) {
+    lastCounts = counts;
+    // A type that no longer has files can't stay selected (its files were just
+    // processed and moved out of the source folder).
+    for (const t of [...selected]) if (!counts[t]) selected.delete(t);
+
+    countsEl.innerHTML = '';
+    let total = 0;
+    for (const [type, label] of TYPES) {
+      const n = counts[type] || 0;
+      total += (type === 'skip' ? 0 : n);
+      const chip = document.createElement('div');
+      const runnable = !NON_RUNNABLE.has(type);
+      chip.className = 'chip' + (n === 0 ? ' zero' : '') + ((!runnable || n === 0) ? ' disabled' : '')
+                     + (selected.has(type) ? ' selected' : '');
+      chip.dataset.type = type;
+      chip.dataset.count = String(n);
+      chip.innerHTML = `<span class="label">${label}</span>` +
+                       `<span class="errs"></span><span class="num">${n}</span>`;
+      if (runnable) {
+        chip.title = n
+          ? `Click to select ${plainLabelOf(type)} (${n} file${n===1?'':'s'}) — selected types are the only ones a run processes`
+          : 'No files of this type';
+        chip.onclick = () => { if (!running && n > 0) toggleType(type); };
+      } else {
+        chip.title = 'Skipped — never processed';
+      }
+      countsEl.appendChild(chip);
+    }
+    $('scanSub').textContent = `${total} file${total===1?'':'s'} ready to process in the source folder.`;
+    syncSelectionUI();
+  }
+
+  async function scan() {
+    $('scanSub').textContent = 'Scanning source folder…';
+    const res = await api.scanFiles();
+    if (!res.ok) {
+      $('scanSub').textContent = '⚠️ Could not scan source folder: ' + res.error;
+      countsEl.innerHTML = '';
+      lastCounts = {};
+      return;
+    }
+    renderCounts(res.counts);
+  }
+
+  // ── Start a run ─────────────────────────────────────────────
+  async function startRun(options, label) {
+    if (running) return;
+    $('summary').classList.remove('show');
+    setRunning(true);
+    setStatus('running', options.dryRun ? 'Dry run…' : (label ? `Running: ${label}` : 'Running…'));
+    appendLog(`\n▶ Starting: ${label || (options.all ? 'Full Run' : options.dryRun ? 'Dry Run' : 'Test Mode')}\n`);
+    const res = await api.startRun(options);
+    if (!res.ok) {
+      appendLog(`\n✗ ${res.error}`);
+      setStatus('error', res.error);
+      setRunning(false);
+    }
+  }
+
+  // Every mode honours the glowing squares. Nothing selected → no types key is
+  // sent at all, so the run covers all types exactly as it always has.
+  // The diagnostic switch rides along on every mode.
+  const skipRoleMapBox = $('skipRoleMap');
+  skipRoleMapBox.onchange = () =>
+    $('skipRoleMapWrap').classList.toggle('on', skipRoleMapBox.checked);
+
+  function withSelection(options) {
+    const o = selected.size ? { ...options, types: [...selected] } : { ...options };
+    if (skipRoleMapBox.checked) o.skipRoleMap = true;
+    return o;
+  }
+  function selectionSuffix() {
+    if (!selected.size) return '';
+    return ` — ${selected.size} selected type${selected.size === 1 ? '' : 's'}: ` +
+           [...selected].map(plainLabelOf).join(', ');
+  }
+
+  $('btnTest').onclick = () => startRun(withSelection({}),              'Test Mode (1 per type)' + selectionSuffix());
+  $('btnFull').onclick = () => startRun(withSelection({ all: true }),   'Full Run' + selectionSuffix());
+  $('btnDry').onclick  = () => startRun(withSelection({ dryRun: true }), 'Dry Run' + selectionSuffix());
+  $('refresh').onclick = () => { if (!running) scan(); };
+
+  // ── Live log + completion from main process ─────────────────
+  api.onLog(line => appendLog(line));
+
+  api.onRunComplete(payload => {
+    setRunning(false);
+    if (!payload.ok) {
+      setStatus('error', payload.error || 'Failed');
+      return;
+    }
+    const s = payload.summary;
+    const took = s && s.durationMs != null ? ` in ${fmtClock(s.durationMs)}` : '';
+    setStatus('done', (s && s.stopped ? (s.aborted ? 'Run aborted' : 'Run stopped') : 'Run complete') + took);
+    renderSummary(s);
+    scan(); // refresh counts — processed files have moved out of the folder
+  });
+
+  // "1.2s" / "1m 05s" — matches the engine's own step formatting.
+  function fmtSecs(ms) {
+    const sec = Math.max(0, ms || 0) / 1000;
+    if (sec < 60) return sec.toFixed(1) + 's';
+    const m = Math.floor(sec / 60);
+    return `${m}m ${String(Math.round(sec - m * 60)).padStart(2, '0')}s`;
+  }
+
+  // Average time per step across the run, costliest FIRST — the top row is the
+  // step worth optimizing. The bar shows each step's share of the timed total.
+  function renderStepTable(rows, fileCount) {
+    if (!rows || !rows.length) return '';
+    return `
+      <div class="steps">
+        <div class="t">Average step times (across ${fileCount} file${fileCount === 1 ? '' : 's'})</div>
+        <table>
+          <tr><th>Step</th><th>Avg</th><th>Runs</th><th>Total</th><th>Share of run</th></tr>
+          ${rows.map((r, i) => `
+            <tr${i === 0 ? ' class="top"' : ''}>
+              <td class="name">${esc(r.label)}</td>
+              <td>${esc(fmtSecs(r.avgMs))}</td>
+              <td>×${r.count}</td>
+              <td>${esc(fmtSecs(r.totalMs))}</td>
+              <td class="bar">
+                <div class="barwrap" title="${(r.share * 100).toFixed(0)}% of all timed step time">
+                  <div class="barfill" style="width:${(r.share * 100).toFixed(1)}%"></div>
+                </div>
+              </td>
+            </tr>`).join('')}
+        </table>
+      </div>`;
+  }
+
+  function renderSummary(s) {
+    const box = $('summary');
+    if (!s) { box.classList.remove('show'); return; } // dry run → no summary object
+    const att = s.needAttention || [];
+    // A file that was mid-flight when Stop was pressed is named explicitly.
+    // Nothing was uploaded and nothing was moved, but the operator watched it
+    // being worked on and deserves to be told what became of it.
+    const cut = (s.interrupted || []).map(r => r.filename);
+    const head = s.stopped
+      ? `<h2 style="color:var(--amber)">⏹ ${s.aborted ? 'Run Aborted' : 'Run Stopped'} — work completed so far</h2>
+         <div style="color:var(--muted);font-size:13.5px;margin:-6px 0 12px">
+           ${esc(s.aborted ? (s.stopReason || 'The run was terminated') + '.' : 'Stopped on request.')}
+           ${s.remaining ? esc(s.remaining) + ' file(s) were not processed and are still in the source folder.' : ''}
+           ${cut.length ? `<div style="margin-top:6px">Stopped part-way through
+              ${cut.map(f => `<b>${esc(f)}</b>`).join(', ')} — nothing was uploaded for
+              ${cut.length > 1 ? 'those files' : 'it'}, and the PDF${cut.length > 1 ? 's are' : ' is'}
+              untouched in the source folder.</div>` : ''}
+         </div>`
+      : `<h2>✓ Run Complete</h2>`;
+    // Timing comes from the engine (authoritative), with the renderer's own
+    // clock as a fallback if an older engine didn't report it.
+    const durMs = s.durationMs != null ? s.durationMs : (live.finalMs != null ? live.finalMs : elapsedMs());
+    const rate  = s.filesPerMin != null ? s.filesPerMin
+                : (durMs ? s.processed / (durMs / 60000) : 0);
+    const pausedNote = s.pausedMs > 1000 ? ` · ${fmtHuman(s.pausedMs)} of that paused` : '';
+
+    box.innerHTML = `
+      ${head}
+      <div class="stats">
+        <div class="stat"><div class="n">${s.processed}</div><div class="l">Processed</div></div>
+        <div class="stat"><div class="n green">${s.successUploads}</div><div class="l">Uploaded</div></div>
+        <div class="stat"><div class="n green">${s.movedCount}</div><div class="l">Files Moved</div></div>
+        <div class="stat"><div class="n ${s.errorCount ? 'red' : ''}">${s.errorCount}</div><div class="l">Errors</div></div>
+        <div class="stat"><div class="n blue time">${esc(fmtClock(durMs))}</div><div class="l">Total Time</div></div>
+        <div class="stat"><div class="n blue time">${rate ? rate.toFixed(1) : '—'}</div><div class="l">Files / Min</div></div>
+      </div>
+      <div class="timing">⏱ Completed in <b>${esc(fmtHuman(durMs))}</b>${
+        rate ? ` — averaging <b>${rate.toFixed(1)} files/min</b>` : ''}${esc(pausedNote)}</div>
+      ${s.retried ? `<div class="timing">↻ <b>${s.retried}</b> file${s.retried === 1 ? '' : 's'} needed an automatic retry
+        (BuildingLink was slow to load the unit's occupancy) — <b>${s.retriedOk}</b> then succeeded.</div>` : ''}
+      ${renderStepTable(s.stepRows, s.processed)}
+      ${att.length ? `<div class="attention"><div class="t">⚠️ Needs manual attention (${att.length})</div>
+        <div id="attList"></div></div>`
+        : `<div class="attention"><div class="t" style="color:var(--green)">✓ Nothing needs manual attention.</div></div>`}
+      ${s.logPath ? `<div style="margin-top:10px;color:var(--muted);font-size:13px">📝 Log saved: ${esc(s.logPath)}</div>` : ''}
+    `;
+
+    // Each attention entry: filename, the plain-English cause, and the raw text
+    // folded away. Built as nodes (not markup) so mkDetails is reused verbatim.
+    const list = $('attList');
+    if (list) {
+      att.forEach(a => {
+        const item = document.createElement('div');
+        item.className = 'att-item';
+        const f = document.createElement('div');
+        f.className = 'att-file';
+        f.textContent = a.filename;
+        const why = document.createElement('div');
+        why.className = 'att-why';
+        why.textContent = a.plainError || a.error || 'Uploaded, but the PDF was not moved.';
+        item.appendChild(f);
+        item.appendChild(why);
+        if (a.error && a.error !== why.textContent) item.appendChild(mkDetails(a.error));
+        list.appendChild(item);
+      });
+    }
+    box.classList.add('show');
+  }
+  const esc = t => String(t == null ? '' : t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  // ── Operator prompts (button modals) ────────────────────────
+  const overlay = $('overlay'), modalTitle = $('modalTitle');
+  const modalCtx = $('modalCtx'), modalMsg = $('modalMsg'), modalOpts = $('modalOpts'), modalRow = $('modalRow');
+  let currentPromptId = null;
+
+  function answer(value) {
+    if (currentPromptId == null) return;
+    api.answerPrompt(currentPromptId, value);
+    currentPromptId = null;
+    overlay.classList.remove('show');
+  }
+
+  function mkActionBtn(text, cls) {
+    const b = document.createElement('button');
+    b.className = 'action ' + (cls || '');
+    b.textContent = text;
+    return b;
+  }
+  function mkOptBtn(o, isToggle) {
+    const b = document.createElement('button');
+    b.className = 'opt-btn' + (isToggle ? ' toggle' : '');
+    const desc = o.description ? `<div class="opt-desc">${esc(o.description)}</div>` : '';
+    b.innerHTML = `<div class="opt-label">${esc(o.label)}</div>${desc}`;
+    return b;
+  }
+
+  // Collapsed "Show details" block holding the raw technical error, so the
+  // plain-English message stays the headline without losing the real text.
+  function mkDetails(raw, label) {
+    const d = document.createElement('details');
+    d.className = 'err-details';
+    d.innerHTML = `<summary>${esc(label || 'Show technical details')}</summary>` +
+                  `<pre>${esc(raw)}</pre>`;
+    return d;
+  }
+
+  // Reset the modal shell with title + context (file / unit) + message.
+  function resetModal({ id, title, filename, unit, message, details }) {
+    currentPromptId = id;
+    modalTitle.textContent = title || 'Action needed';
+    modalCtx.innerHTML = '';
+    if (filename) {
+      const f = document.createElement('div'); f.className = 'ctx-row';
+      f.innerHTML = `<span class="ctx-label">File</span> ${esc(filename)}`;
+      modalCtx.appendChild(f);
+    }
+    if (unit) {
+      const u = document.createElement('div'); u.className = 'ctx-row';
+      u.innerHTML = `<span class="ctx-label">Unit</span> <span class="unit-badge">${esc(unit)}</span>`;
+      modalCtx.appendChild(u);
+    }
+    modalMsg.textContent = message || '';
+    modalMsg.style.display = message ? '' : 'none';
+    modalOpts.innerHTML = '';
+    modalRow.innerHTML = '';
+    if (details) modalOpts.appendChild(mkDetails(details));
+  }
+
+  // Structured choice prompt → clickable buttons.
+  api.onChoice(({ id, spec }) => {
+    const s = spec || {};
+    resetModal({ id, title: s.title, filename: s.filename, unit: s.unit,
+                 message: s.message, details: s.details });
+
+    if (s.kind === 'continue') {
+      const b = mkActionBtn('Continue ▶', 'primary');
+      b.onclick = () => answer('');
+      modalRow.appendChild(b);
+      overlay.classList.add('show');
+      setTimeout(() => b.focus(), 50);
+      return;
+    }
+
+    if (s.kind === 'select') {
+      // Multi-select: toggle option buttons + Confirm / Select All / Skip.
+      const selected = new Set();
+      const confirmBtn = mkActionBtn('Confirm Selection', 'primary');
+      confirmBtn.disabled = true;
+      (s.options || []).forEach(o => {
+        const btn = mkOptBtn(o, true);
+        btn.onclick = () => {
+          if (selected.has(o.value)) { selected.delete(o.value); btn.classList.remove('selected'); }
+          else { selected.add(o.value); btn.classList.add('selected'); }
+          confirmBtn.disabled = selected.size === 0;
+        };
+        modalOpts.appendChild(btn);
+      });
+      if (s.allowAll) {
+        const allB = mkActionBtn('Select All', 'ghost');
+        allB.onclick = () => answer('all');
+        modalRow.appendChild(allB);
+      }
+      confirmBtn.onclick = () => { if (selected.size) answer([...selected].join(',')); };
+      modalRow.appendChild(confirmBtn);
+      if (s.allowSkip) {
+        const skipB = mkActionBtn('Skip', 'ghost danger');
+        skipB.onclick = () => answer('s');
+        modalRow.appendChild(skipB);
+      }
+      overlay.classList.add('show');
+      setTimeout(() => { const f = modalOpts.querySelector('.opt-btn'); if (f) f.focus(); }, 50);
+      return;
+    }
+
+    // Single choice → one button per option; clicking resolves immediately. No
+    // auto-focus, so an accidental Enter can't pick a destructive first option.
+    (s.options || []).forEach(o => {
+      const btn = mkOptBtn(o, false);
+      btn.onclick = () => answer(o.value);
+      modalOpts.appendChild(btn);
+    });
+    overlay.classList.add('show');
+  });
+
+  // Plain text prompt fallback (no structured spec). Builds a text input on the
+  // fly — not used by the normal flow, but keeps any future ask() working.
+  api.onPrompt(({ id, question }) => {
+    resetModal({ id, title: 'Action needed', message: question });
+    const input = document.createElement('input');
+    input.type = 'text'; input.autocomplete = 'off';
+    modalOpts.appendChild(input);
+    const submit = mkActionBtn('Submit', 'primary');
+    submit.onclick = () => answer(input.value);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); answer(input.value); } });
+    modalRow.appendChild(submit);
+    overlay.classList.add('show');
+    setTimeout(() => input.focus(), 50);
+  });
+
+  // ── Welcome / splash screen ─────────────────────────────────
+  // Load the logo and knock out its white background so only the tree + text
+  // show on the dark splash. mix-blend-mode would dim a colored logo on a dark
+  // background, so we do a true pixel-level knockout via canvas (with edge
+  // feathering) and fall back to the raw image, then to nothing, if that fails.
+  async function loadLogo() {
+    const wrap = $('logoWrap');
+    let dataUrl = null;
+    try { dataUrl = await api.getLogo(); } catch (e) { dataUrl = null; }
+    if (!dataUrl) { wrap.innerHTML = ''; return; } // no logo.png → title + hint only
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) throw new Error('empty image');
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        const LO = 230;            // brightness where feathering starts
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const min = Math.min(r, g, b), max = Math.max(r, g, b);
+          // Near-white = bright AND low saturation. Coloured tree/text and dark
+          // text keep their alpha; the white box and its soft edges fade out.
+          if (min >= LO && (max - min) <= 16) {
+            const t = (min - LO) / (255 - LO);     // 0 at LO → 1 at pure white
+            d[i + 3] = Math.round(d[i + 3] * (1 - t));
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        wrap.innerHTML = '';
+        wrap.appendChild(c);
+      } catch (e) {
+        // Knockout failed (e.g. tainted canvas) — show the raw image instead.
+        wrap.innerHTML = '';
+        const fallback = new Image();
+        fallback.src = img.src;
+        fallback.style.mixBlendMode = 'multiply';
+        wrap.appendChild(fallback);
+      }
+    };
+    // Unreadable image → leave the area empty (title + hint still show).
+    img.onerror = () => { wrap.innerHTML = ''; };
+    img.src = dataUrl;
+  }
+
+  function initWelcome() {
+    const welcome = $('welcome');
+    const title = $('welcomeTitle');
+    if (!welcome) return;
+    // Smooth fade-in once the element is in the DOM.
+    requestAnimationFrame(() => { welcome.style.opacity = '1'; });
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return;
+      dismissed = true;
+      title.classList.add('stop');      // stop the spin, settle to face-front
+      welcome.classList.add('dismiss'); // block further interaction
+      welcome.style.opacity = '0';      // fade out (same .8s transition)
+      window.removeEventListener('keydown', dismiss, true);
+      window.removeEventListener('mousedown', dismiss, true);
+      setTimeout(() => { welcome.style.display = 'none'; }, 850);
+    };
+    // Any key or click anywhere dismisses (capture phase, so it wins).
+    window.addEventListener('keydown', dismiss, true);
+    window.addEventListener('mousedown', dismiss, true);
+    loadLogo();
+  }
+
+  // ── Boot ────────────────────────────────────────────────────
+  initWelcome();
+  scan();
+})();
+</script>
+</body>
+</html>
