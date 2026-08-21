@@ -94,9 +94,17 @@ Produces a per-user NSIS installer in `dist\` — no admin rights required to in
 
 ## Requirements
 
+**To run the installed app** — what an end user needs:
+
 - Windows
 - Google Chrome (the automation drives real Chrome, not a bundled browser)
-- Node.js 18+ and network access to the document share
+- Network access to the document share
+
+Node.js is *not* required: the installer bundles its own runtime.
+
+**To work on the source** — additionally:
+
+- Node.js 18+
 
 ## Notes
 
