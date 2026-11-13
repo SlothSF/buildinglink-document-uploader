@@ -6,16 +6,16 @@ const readline = require('readline');
 // ═══════════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════════
-const FILES_DIR  = 'S:\\Unsorted files';
-const DEST_ROOT  = 'S:\\UNIT FILES';
+const FILES_DIR  = 'C:\Users\alyssa.puebla\OneDrive - Woodlake Towers Condominium\Office - scans\Unsorted files';
+const DEST_ROOT  = 'C:\Users\alyssa.puebla\OneDrive - Woodlake Towers Condominium\Office - scans\UNIT FILES';
 const SEARCH_URL = 'https://buildinglink.com/v2/mgmt/UnitProfile/Searchunit.aspx';
 
 // ── Common Area work orders (building-level, NOT unit-level) ───────────────
 // Unlike every other category, these do not live in the root of FILES_DIR —
 // they sit in a per-building SUBFOLDER of it:
-//   S:\Unsorted files\bldg 1 common area work orders\
-//   S:\Unsorted files\bldg 2 common area work orders\
-//   S:\Unsorted files\bldg 3 common area work order\     ← note: no "s"
+//   C:\Users\alyssa.puebla\OneDrive - Woodlake Towers Condominium\Office - scans\Unsorted files\bldg 1 common area work orders\
+//   C:\Users\alyssa.puebla\OneDrive - Woodlake Towers Condominium\Office - scans\Unsorted files\bldg 2 common area work orders\
+//   C:\Users\alyssa.puebla\OneDrive - Woodlake Towers Condominium\Office - scans\Unsorted files\bldg 3 common area work order\     ← note: no "s"
 // The folder names are typed by hand and already drift ("areas"/"area",
 // "orders"/"order"), so a folder is recognized by its three PARTS in any order
 // and either plurality rather than by an exact name.
